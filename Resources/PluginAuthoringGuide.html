@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PluginHub 插件编写指南</title>
+<style>
+  body { font-family: -apple-system, sans-serif; max-width: 720px; margin: 40px auto; padding: 0 20px; line-height: 1.7; color: #333; }
+  h1 { border-bottom: 2px solid #007AFF; padding-bottom: 8px; }
+  h2 { margin-top: 32px; color: #007AFF; }
+  pre { background: #f5f5f5; padding: 16px; border-radius: 8px; overflow-x: auto; font-size: 13px; }
+  code { background: #f0f0f0; padding: 2px 6px; border-radius: 4px; font-size: 13px; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { border: 1px solid #ddd; padding: 8px 12px; text-align: left; font-size: 13px; }
+  th { background: #f5f5f5; }
+</style>
+</head>
+<body>
+
+<h1>PluginHub 插件编写指南</h1>
+
+<p>PluginHub 使用 Python 脚本作为插件。脚本输出 JSON，PluginHub 将其渲染为 macOS 菜单栏组件。</p>
+
+<h2>快速开始</h2>
+
+<p>一个最简单的插件：</p>
+
+<pre>
+#!/usr/bin/env python3
+# PluginHub:
+#   name: 我的插件
+#   description: 一个示例插件
+#   icon: star.fill
+# /PluginHub
+
+import json
+from datetime import datetime, timezone
+
+data = {
+    "updatedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+    "title": "我的插件",
+    "icon": "star.fill",
+    "components": [
+        {
+            "type": "text",
+            "data": {
+                "id": "hello",
+                "content": "Hello, PluginHub!",
+                "style": "plain"
+            }
+        }
+    ]
+}
+
+print(json.dumps(data, ensure_ascii=False))
+</pre>
+
+<h2>元数据声明</h2>
+<p>在脚本开头用注释块声明插件信息：</p>
+<pre>
+# PluginHub:
+#   name: 插件名称
+#   description: 描述
+#   author: 作者
+#   version: 1.0.0
+#   icon: SF Symbol 名称
+#   parameters:
+#     - name: key
+#       type: string|secret|integer|boolean|choice
+#       label: 显示名称
+#       required: true|false
+#       default: 默认值
+#       options:
+#         - label: 选项A
+#           value: a
+# /PluginHub
+</pre>
+
+<h2>JSON 输出结构</h2>
+
+<pre>
+{
+  "updatedAt": "2024-01-01T00:00:00Z",  // ISO 8601 时间戳
+  "title": "插件标题",
+  "icon": "SF Symbol 名称",
+  "badge": "角标文字",
+  "notification": {                     // 可选：系统通知
+    "title": "通知标题",
+    "body": "通知内容",
+    "sound": true,
+    "scheduledAt": "2024-01-01T09:00:00Z"
+  },
+  "components": [...]                   // UI 组件列表
+}
+</pre>
+
+<h2>组件类型</h2>
+
+<h3>progress（进度条）</h3>
+<pre>
+{
+  "type": "progress",
+  "data": {
+    "id": "cpu",
+    "label": "CPU",
+    "value": 45.5,
+    "max": 100,
+    "unit": "%",
+    "color": "#007AFF",      // 可选 hex 颜色
+    "style": "bar|ring|gauge"
+  }
+}
+</pre>
+
+<h3>list（列表）</h3>
+<pre>
+{
+  "type": "list",
+  "data": {
+    "id": "info",
+    "title": "系统信息",
+    "style": "simple|detailed|table",
+    "items": [
+      {
+        "title": "磁盘使用",
+        "subtitle": "Macintosh HD",   // 仅 detailed 样式
+        "value": "100GB / 512GB",
+        "icon": "externaldrive",
+        "color": "#34C759",
+        "url": "https://..."           // 可点击链接
+      }
+    ]
+  }
+}
+</pre>
+
+<h3>text（文本）</h3>
+<pre>
+{
+  "type": "text",
+  "data": {
+    "id": "status",
+    "content": "一切正常",
+    "style": "plain|alert|success|warning",
+    "icon": "checkmark.circle"
+  }
+}
+</pre>
+
+<h3>chart（图表）</h3>
+<pre>
+{
+  "type": "chart",
+  "data": {
+    "id": "trend",
+    "title": "一周趋势",
+    "type": "line|bar|pie",
+    "xLabel": "日期",
+    "yLabel": "数量",
+    "data": [
+      {"label": "周一", "value": 10, "series": "系列A"},
+      {"label": "周二", "value": 15, "series": "系列A"}
+    ]
+  }
+}
+</pre>
+
+<h3>image（图片）</h3>
+<pre>
+{
+  "type": "image",
+  "data": {
+    "id": "photo",
+    "url": "https://... 或 data:image/png;base64,...",
+    "caption": "图片说明",
+    "width": 300,
+    "height": 200
+  }
+}
+</pre>
+
+<h3>interactive（交互组件）</h3>
+<pre>
+{
+  "type": "interactive",
+  "data": {
+    "id": "scratchcard",
+    "type": "scratchcard|button|input|toggle",
+    "config": {
+      "title": "每日刮刮乐",
+      "description": "试试手气",
+      "actions": [
+        {"id": "scratch", "label": "刮开", "type": "callback"}
+      ]
+    },
+    "state": {"prize": "恭喜中奖!"}
+  }
+}
+</pre>
+
+<h3>custom（自定义）</h3>
+<pre>
+{
+  "type": "custom",
+  "data": {
+    "id": "stats",
+    "type": "键值表",
+    "data": {"key1": "value1", "key2": "value2"}
+  }
+}
+</pre>
+
+<h2>环境变量</h2>
+<table>
+  <tr><th>变量名</th><th>说明</th></tr>
+  <tr><td><code>PLUGINHUB_SHARED_DIR</code></td><td>插件间共享数据目录，可读取其他插件的输出</td></tr>
+  <tr><td><code>PLUGINHUB_TRIGGER_FILE</code></td><td>写入此文件可立即触发刷新</td></tr>
+  <tr><td><code>PLUGINHUB_THERMAL_STATE</code></td><td>系统热状态（nominal/fair/serious/critical）</td></tr>
+  <tr><td><code>PLUGINHUB_PARAM_*</code></td><td>用户在设置中配置的参数值</td></tr>
+</table>
+
+<h2>约束限制</h2>
+<ul>
+  <li>JSON 输出最大 1MB</li>
+  <li>单个插件最多 50 个组件</li>
+  <li>执行超时 30 秒</li>
+  <li>刷新间隔最小 10 秒</li>
+</ul>
+
+</body>
+</html>

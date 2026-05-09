@@ -1,0 +1,34 @@
+# Build
+.build/
+*.app/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Claude
+.claude/
+CLAUDE.md
+AGENTS.md
+
+# IDE
+.vscode/
+.idea/
+*.xcodeproj/
+*.xcworkspace/
+
+# Credentials & secrets
+*.key
+*.pem
+*.token
+.env
+*.env
+
+# Temp
+/tmp/
+*.pyc
+__pycache__/
+
+# Plugin output
+*.log
