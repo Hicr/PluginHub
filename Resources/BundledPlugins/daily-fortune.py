@@ -119,7 +119,7 @@ else:
     import base64
     fortune_json = json.dumps({"text": fortune["text"], "style": fortune["style"]}, ensure_ascii=False)
     b64 = base64.b64encode(fortune_json.encode()).decode()
-    cmd = f"echo {b64} | base64 -d > {today_file}"
+    cmd = f"printf '%s' {b64} | /usr/bin/base64 -d > {today_file}"
 
     components = [
         {

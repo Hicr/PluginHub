@@ -87,6 +87,8 @@ struct InteractiveRenderer: View {
 
     // MARK: - Scratchcard
 
+    @State private var scratchProgress: Double = 0
+
     private var scratchcardView: some View {
         VStack(spacing: 6) {
             if component.state?["revealed"] == "true" {
@@ -102,29 +104,42 @@ struct InteractiveRenderer: View {
                             .font(.title)
                             .multilineTextAlignment(.center)
                             .frame(maxWidth: .infinity, alignment: .center)
-                            .padding(.horizontal)
+                            .padding(.vertical, 30)
                     }
                     .buttonStyle(.plain)
                 }
             } else {
-                Button {
-                    if let actions = component.config.actions {
-                        for action in actions {
-                            performAction(action)
-                        }
+                ZStack {
+                    // 被遮住的签文（保持高度一致）
+                    if let prize = component.state?["prize"] {
+                        Text(prize)
+                            .font(.title)
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .padding(.vertical, 30)
                     }
-                } label: {
-                    Text("刮开查看")
-                        .font(.callout)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                        .background(Color.gray.opacity(0.15))
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
+
+                    // 刮刮乐遮罩
+                    ScratchCardOverlay(
+                        onScratchProgress: { pct in
+                            scratchProgress = pct
+                        },
+                        onReveal: {
+                            if let actions = component.config.actions {
+                                for action in actions {
+                                    performAction(action)
+                                }
+                            }
+                        }
+                    )
+                    .padding(8)
                 }
-                .buttonStyle(.plain)
+                .frame(maxWidth: .infinity)
             }
         }
     }
+
+    private let revealThreshold = 0.5
 
     // MARK: - Action
 
@@ -142,15 +157,16 @@ struct InteractiveRenderer: View {
             }
         case .callback:
             if let payload = action.payload {
-                let process = Process()
-                process.executableURL = URL(fileURLWithPath: "/bin/sh")
-                process.arguments = ["-c", payload]
-                process.terminationHandler = { _ in
+                DispatchQueue.global().async {
+                    let process = Process()
+                    process.executableURL = URL(fileURLWithPath: "/bin/sh")
+                    process.arguments = ["-c", payload]
+                    process.launch()
+                    process.waitUntilExit()
                     DispatchQueue.main.async {
                         onAction?()
                     }
                 }
-                try? process.run()
             }
         }
     }

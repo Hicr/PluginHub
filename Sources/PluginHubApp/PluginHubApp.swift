@@ -7,10 +7,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     let store = PluginHubStore()
     private var statusItem: NSStatusItem?
     private var popover: NSPopover?
+    private var glassWindow: NSWindow?
     private var popoverHostingController: NSViewController?
     private var globalClickMonitor: Any?
     private var localClickMonitor: Any?
     private var settingsWindowController: NSWindowController?
+
+    private var useGlassEffect: Bool {
+        if #available(macOS 26, *) {
+            return store.configuration.visualEffect.enabled
+        }
+        return false
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Self.shared = self
@@ -53,33 +61,105 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             return
         }
         guard let button = statusItem?.button else { return }
+
         if let popover, popover.isShown {
             popover.performClose(nil)
             return
         }
-        // 复用缓存的 hosting controller
+        if let w = glassWindow, w.isVisible {
+            w.orderOut(nil)
+            stopGlobalClickMonitor()
+            return
+        }
+
         let hostingController: NSViewController
         if let cached = popoverHostingController {
             hostingController = cached
         } else {
             let vc = NSHostingController(
-                rootView: DashboardView(store: store)
-                    .frame(width: 400)
+                rootView: DashboardView(store: store) { [weak self] newSize in
+                    self?.updateContentSize(newSize)
+                }
+                .frame(width: 400)
             )
             popoverHostingController = vc
             hostingController = vc
         }
         hostingController.view.appearance = NSApp.effectiveAppearance
 
-        let popover = NSPopover()
-        popover.contentSize = NSSize(width: 400, height: 500)
-        popover.behavior = .applicationDefined
-        popover.animates = false
-        popover.delegate = self
-        popover.appearance = NSApp.effectiveAppearance
-        popover.contentViewController = hostingController
-        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-        self.popover = popover
+        let contentWidth = DashboardView.contentWidth
+        let contentSize = computeContentSize(hostingController: hostingController, width: contentWidth)
+
+        if useGlassEffect {
+            showGlassWindow(button: button, hostingController: hostingController, size: contentSize)
+        } else {
+            let popover = NSPopover()
+            popover.contentSize = contentSize
+            popover.behavior = .applicationDefined
+            popover.animates = false
+            popover.delegate = self
+            popover.appearance = NSApp.effectiveAppearance
+            popover.contentViewController = hostingController
+            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            self.popover = popover
+            startGlobalClickMonitor()
+        }
+    }
+
+    private func updateContentSize(_ size: NSSize) {
+        let width = DashboardView.contentWidth
+        let maxH: CGFloat = (NSScreen.main?.visibleFrame.height ?? 800) * 0.85
+        let clamped = NSSize(width: width, height: min(max(size.height, 120), maxH))
+
+        if let window = glassWindow, window.isVisible {
+            window.setContentSize(clamped)
+        }
+        if let popover, popover.isShown {
+            popover.contentSize = clamped
+        }
+    }
+
+    private func computeContentSize(hostingController: NSViewController, width: CGFloat) -> NSSize {
+        let maxH: CGFloat = (NSScreen.main?.visibleFrame.height ?? 800) * 0.85
+        // 给一个很大的高度让视图自由收缩到内容实际大小
+        hostingController.view.frame = NSRect(x: 0, y: 0, width: width, height: maxH)
+        hostingController.view.layoutSubtreeIfNeeded()
+        let fit = hostingController.view.fittingSize
+        let height = min(max(fit.height, 120), maxH)
+        return NSSize(width: width, height: height)
+    }
+
+    private func showGlassWindow(button: NSStatusBarButton, hostingController: NSViewController, size: NSSize) {
+        let window: NSWindow
+        if let existing = glassWindow {
+            window = existing
+        } else {
+            window = NSWindow(
+                contentRect: NSRect(origin: .zero, size: size),
+                styleMask: [.borderless, .fullSizeContentView],
+                backing: .buffered,
+                defer: false
+            )
+            window.isOpaque = false
+            window.backgroundColor = .clear
+            window.level = .floating
+            window.hasShadow = true
+            window.collectionBehavior = [.transient, .ignoresCycle]
+            window.animationBehavior = .none
+            window.delegate = self
+            window.contentViewController = hostingController
+            glassWindow = window
+        }
+
+        hostingController.view.frame = NSRect(origin: .zero, size: size)
+        window.setContentSize(size)
+
+        let buttonScreenRect = button.window!.convertToScreen(button.frame)
+        let winX = buttonScreenRect.midX - size.width / 2
+        let winY = buttonScreenRect.minY
+        window.setFrameTopLeftPoint(NSPoint(x: winX, y: winY))
+
+        window.makeKeyAndOrderFront(nil)
         startGlobalClickMonitor()
     }
 
@@ -99,18 +179,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     }
 
     private func closePopoverIfNeeded(event: NSEvent) {
-        guard let popover, popover.isShown else { return }
+        // 检查菜单栏按钮
         if let button = statusItem?.button,
            let window = event.window,
            window === button.window {
             return
         }
-        if let popoverWindow = popover.contentViewController?.view.window,
-           let window = event.window,
-           window === popoverWindow {
+        // 检查液态玻璃窗口
+        if let w = glassWindow, w.isVisible,
+           let eventWindow = event.window,
+           eventWindow === w {
             return
         }
-        popover.performClose(nil)
+        // 检查传统 popover
+        if let popover, popover.isShown,
+           let popoverWindow = popover.contentViewController?.view.window,
+           let eventWindow = event.window,
+           eventWindow === popoverWindow {
+            return
+        }
+        // 关闭
+        popover?.performClose(nil)
+        glassWindow?.orderOut(nil)
+        stopGlobalClickMonitor()
     }
 
     private func stopGlobalClickMonitor() {
@@ -132,6 +223,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         if let popover, popover.isShown {
             popover.performClose(nil)
         }
+        glassWindow?.orderOut(nil)
+        stopGlobalClickMonitor()
         if let controller = settingsWindowController, let window = controller.window, !window.isReleasedWhenClosed {
             window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
@@ -158,13 +251,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     func popoverDidClose(_ notification: Notification) {
         stopGlobalClickMonitor()
         popover = nil
-        // 保持 hostingController 缓存，下次打开更快
     }
 
     // MARK: - NSWindowDelegate
 
     func windowWillClose(_ notification: Notification) {
-        settingsWindowController = nil
+        if notification.object as? NSWindow === glassWindow {
+            stopGlobalClickMonitor()
+        } else {
+            settingsWindowController = nil
+        }
     }
 }
 

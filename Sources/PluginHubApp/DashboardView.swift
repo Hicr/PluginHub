@@ -3,9 +3,12 @@ import PluginHubCore
 
 struct DashboardView: View {
     @ObservedObject var store: PluginHubStore
+    var onSizeChange: ((NSSize) -> Void)?
+
+    static let contentWidth: CGFloat = 400
 
     private var maxHeight: CGFloat {
-        (NSScreen.main?.visibleFrame.height ?? 800) * 2 / 3
+        (NSScreen.main?.visibleFrame.height ?? 800) * 0.85
     }
 
     private var enabledPlugins: [PluginConfiguration] {
@@ -14,48 +17,75 @@ struct DashboardView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HeaderView(store: store)
+            // 小三角指示器（不裁切，共享背景材质）
+            TriangleIndicator()
+                .fill(.clear)
+                .frame(width: 16, height: 8)
 
-            Divider()
+            VStack(spacing: 0) {
+                HeaderView(store: store)
 
-            if enabledPlugins.isEmpty {
-                EmptyPluginsView {
-                    AppDelegate.shared?.openSettings()
-                }
-            } else {
-                ScrollView {
-                    LazyVStack(spacing: 10) {
-                        ForEach(Array(enabledPlugins.enumerated()), id: \.element.id) { index, plugin in
-                            PluginCardView(
-                                snapshot: store.snapshot(for: plugin),
-                                isExpanded: store.cardExpandedStates[plugin.id] ?? true,
-                                isFirst: index == 0,
-                                isLast: index == enabledPlugins.count - 1,
-                                onToggle: { store.toggleCardExpanded(pluginID: plugin.id) },
-                                onMoveUp: { store.movePluginUp(pluginID: plugin.id) },
-                                onMoveDown: { store.movePluginDown(pluginID: plugin.id) },
-                                onRefresh: {
-                                    store.refresh(pluginID: plugin.id, force: true)
-                                },
-                                onInteract: {
-                                    store.refresh(pluginID: plugin.id, force: true)
-                                }
-                            )
-                        }
+                Divider()
+
+                if enabledPlugins.isEmpty {
+                    EmptyPluginsView {
+                        AppDelegate.shared?.openSettings()
                     }
-                    .padding(10)
+                } else {
+                    ScrollView {
+                        LazyVStack(spacing: 10) {
+                            ForEach(Array(enabledPlugins.enumerated()), id: \.element.id) { index, plugin in
+                                PluginCardView(
+                                    snapshot: store.snapshot(for: plugin),
+                                    isExpanded: store.cardExpandedStates[plugin.id] ?? true,
+                                    isFirst: index == 0,
+                                    isLast: index == enabledPlugins.count - 1,
+                                    onToggle: { store.toggleCardExpanded(pluginID: plugin.id) },
+                                    onMoveUp: { store.movePluginUp(pluginID: plugin.id) },
+                                    onMoveDown: { store.movePluginDown(pluginID: plugin.id) },
+                                    onRefresh: {
+                                        store.refresh(pluginID: plugin.id, force: true)
+                                    },
+                                    onInteract: {
+                                        store.refresh(pluginID: plugin.id, force: true)
+                                    }
+                                )
+                            }
+                        }
+                        .padding(10)
+                    }
+                    .frame(maxHeight: maxHeight)
                 }
-                .frame(maxHeight: maxHeight)
             }
+            .clipShape(RoundedRectangle(cornerRadius: 16))
         }
         .background(backgroundView)
+        .background(
+            GeometryReader { proxy in
+                Color.clear
+                    .onAppear { reportSize(proxy.size) }
+                    .onChange(of: proxy.size.height) { newH in reportSize(proxy.size) }
+                    .onReceive(store.$configuration) { _ in
+                        DispatchQueue.main.async { reportSize(proxy.size) }
+                    }
+            }
+        )
+    }
+
+    private func reportSize(_ size: CGSize) {
+        onSizeChange?(NSSize(width: size.width, height: size.height))
     }
 
     @ViewBuilder
     private var backgroundView: some View {
         if store.configuration.visualEffect.enabled {
-            Color.clear
-                .background(.ultraThinMaterial)
+            if #available(macOS 26, *) {
+                Color.clear
+                    .glassEffect(in: .rect(cornerRadius: 16))
+            } else {
+                Color.clear
+                    .background(.ultraThinMaterial)
+            }
         } else {
             Color(nsColor: .windowBackgroundColor)
         }
@@ -231,12 +261,20 @@ struct PluginCardView: View {
             }
         }
         .padding(10)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
-        )
+        .overlay(cardStroke)
+    }
+
+    @ViewBuilder
+    private var cardBackground: some View {
+        Color(nsColor: .controlBackgroundColor)
+    }
+
+    @ViewBuilder
+    private var cardStroke: some View {
+        RoundedRectangle(cornerRadius: 8)
+            .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
     }
 
     @ViewBuilder
@@ -363,6 +401,19 @@ struct ComponentRowView: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - Triangle Indicator
+
+struct TriangleIndicator: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.midX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+        path.closeSubpath()
+        return path
     }
 }
 
