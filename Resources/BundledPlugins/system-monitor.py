@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # PluginHub:
 #   name: 系统监控
-#   description: CPU、内存、电源、磁盘、网速、热状态
+#   description: 显示 CPU、内存、磁盘、网速、电源等系统状态
 #   icon: desktopcomputer
 # /PluginHub
 
@@ -54,58 +54,21 @@ def get_memory_usage():
     return None
 
 
-def get_power_info():
-    """返回 (充电中, 功率瓦数)"""
-    batt_out = run_cmd(["pmset", "-g", "batt"])
-    on_ac = "AC Power" in batt_out
-
-    wattage = None
-    if on_ac:
-        ac_out = run_cmd(["pmset", "-g", "ac"])
-        for line in ac_out.split("\n"):
-            if "Wattage" in line:
-                try:
-                    wattage = int(line.split("=")[-1].strip().replace("W", ""))
-                except (ValueError, IndexError):
-                    pass
-    else:
-        try:
-            result = subprocess.run(
-                ["ioreg", "-r", "-c", "AppleSmartBattery"],
-                capture_output=True, text=True, timeout=5
-            )
-            raw_current = raw_voltage = None
-            for line in result.stdout.split("\n"):
-                if '"InstantAmperage"' in line:
-                    try:
-                        raw_current = int(line.split("=")[-1].strip())
-                    except ValueError:
-                        pass
-                if '"Voltage"' in line:
-                    try:
-                        raw_voltage = int(line.split("=")[-1].strip())
-                    except ValueError:
-                        pass
-            if raw_current and raw_voltage:
-                # 转换无符号溢出值（负电流 = 放电）
-                if raw_current > 0x7FFFFFFFFFFFFFFF:
-                    raw_current = raw_current - 0x10000000000000000
-                if raw_voltage > 0x7FFFFFFFFFFFFFFF:
-                    raw_voltage = raw_voltage - 0x10000000000000000
-                wattage = abs(raw_current * raw_voltage) // 1000000
-        except Exception:
-            pass
-
-    return on_ac, wattage
-
-
 def get_disk_info():
-    out = run_cmd(["df", "-h", "/"])
+    out = run_cmd(["df", "-H", "/"])
     for line in out.split("\n"):
         parts = line.split()
         if len(parts) >= 9 and parts[0].startswith("/dev/"):
-            return parts[3], parts[1]
-    return None
+            pct = int(parts[4].replace("%", "")) if parts[4].endswith("%") else 0
+            # 容量用 GiB (/1024) 显示
+            try:
+                total_blocks = int(parts[1].replace("Gi", "").replace("G", "")) if any(c.isdigit() for c in parts[1]) else 0
+                avail_blocks = int(parts[3].replace("Gi", "").replace("G", "")) if any(c.isdigit() for c in parts[3]) else 0
+            except ValueError:
+                total_blocks = 0
+                avail_blocks = 0
+            return pct, avail_blocks, total_blocks
+    return None, None, None
 
 
 def get_network_speed():
@@ -157,35 +120,49 @@ def fmt_speed(b):
     return f"{b / 1024:.1f} KB/s"
 
 
+def get_power_info():
+    batt_out = run_cmd(["pmset", "-g", "batt"])
+    on_ac = "AC Power" in batt_out
+    wattage = None
+    if on_ac:
+        ac_out = run_cmd(["pmset", "-g", "ac"])
+        for line in ac_out.split("\n"):
+            if "Wattage" in line:
+                try:
+                    wattage = int(line.split("=")[-1].strip().replace("W", ""))
+                except (ValueError, IndexError):
+                    pass
+    return on_ac, wattage
+
+
 def get_thermal_state():
     state = os.environ.get("PLUGINHUB_THERMAL_STATE", "nominal")
-    levels = {"nominal": "正常", "fair": "偏高",
-              "serious": "很高", "critical": "严重"}
-    return levels.get(state, "正常")
+    levels = {"nominal": ("正常", "#34C759"), "fair": ("偏高", "#FFD60A"),
+              "serious": ("很高", "#FF9500"), "critical": ("严重", "#FF3B30")}
+    return levels.get(state, ("正常", "#34C759"))
 
 
 def usage_color(pct):
-    if pct >= 80:
-        return "#FF3B30"
-    if pct >= 60:
-        return "#FF9500"
-    if pct >= 40:
-        return "#FFD60A"
+    if pct >= 80: return "#FF3B30"
+    if pct >= 60: return "#FF9500"
+    if pct >= 40: return "#FFD60A"
     return "#34C759"
 
 
 # --- 收集数据 ---
 cpu = get_cpu_usage()
 memory = get_memory_usage()
-on_ac, wattage = get_power_info()
-disk_info = get_disk_info()
+disk_pct, disk_avail, disk_total = get_disk_info()
 speed_down, speed_up = get_network_speed()
-thermal_label = get_thermal_state()
+on_ac, power_w = get_power_info()
+thermal_label, thermal_color = get_thermal_state()
 
-# --- 双列布局 (3x2) ---
+# --- 构建组件 ---
 components = []
 
-# [1,1] CPU 进度条
+# ===== 核心指标区（3 列：CPU | 内存 | 磁盘）=====
+
+# CPU 进度条
 if cpu is not None:
     components.append({
         "type": "progress",
@@ -200,7 +177,7 @@ if cpu is not None:
         }
     })
 
-# [1,2] 内存进度条
+# 内存 进度条
 if memory is not None:
     components.append({
         "type": "progress",
@@ -215,56 +192,57 @@ if memory is not None:
         }
     })
 
-# [2,1] 电源
+# 磁盘 进度条 + 容量信息
+if disk_pct is not None and disk_avail and disk_total:
+    components.append({
+        "type": "progress",
+        "data": {
+            "id": "disk",
+            "label": "磁盘",
+            "value": disk_pct,
+            "max": 100,
+            "unit": f"{disk_avail}G / {disk_total}G",
+            "color": usage_color(disk_pct),
+            "style": "bar"
+        }
+    })
+
+# ===== 状态信息区（3 列：电源 | 网速 | 热状态）=====
+
+# 电源
 if on_ac:
-    power_text = f"充电 {wattage}W" if wattage else "电源适配器"
+    power_text = f"⚡ {power_w}W 充电中" if power_w else "⚡ 电源供电"
 else:
-    power_text = f"放电 {wattage}W" if wattage else "电池供电"
+    power_text = "🔋 电池供电"
 components.append({
     "type": "text",
     "data": {
         "id": "power",
         "content": power_text,
-        "style": "plain",
-        "icon": "powerplug" if on_ac else "battery.100"
+        "style": "plain"
     }
 })
 
-# [2,2] 磁盘
-if disk_info is not None:
-    avail, total = disk_info
-    components.append({
-        "type": "text",
-        "data": {
-            "id": "disk",
-            "content": f"可用 {avail} / {total}",
-            "style": "plain",
-            "icon": "externaldrive"
-        }
-    })
-
-# [3,1] 网速
+# 网速
+net_text = f"↓ {fmt_speed(speed_down)}\n↑ {fmt_speed(speed_up)}"
 components.append({
     "type": "text",
     "data": {
         "id": "network",
-        "content": f"↓ {fmt_speed(speed_down)}\n↑ {fmt_speed(speed_up)}",
+        "content": net_text,
         "style": "plain",
         "icon": "network"
     }
 })
 
-# [3,2] 热状态
-thermal_icon = "thermometer.medium"
-if thermal_label in ("很高", "严重"):
-    thermal_icon = "thermometer.high"
+# 热状态
 components.append({
     "type": "text",
     "data": {
         "id": "thermal",
-        "content": f"热状态 {thermal_label}",
+        "content": thermal_label,
         "style": "plain",
-        "icon": thermal_icon
+        "icon": "thermometer.medium"
     }
 })
 
@@ -272,7 +250,7 @@ data = {
     "updatedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
     "title": "系统监控",
     "icon": "desktopcomputer",
-    "components": components
+    "components": components,
 }
 
 print(json.dumps(data, ensure_ascii=False))

@@ -2,6 +2,9 @@ import AppKit
 import Darwin
 import Foundation
 import PluginHubCore
+#if canImport(WidgetKit)
+import WidgetKit
+#endif
 
 @MainActor
 final class PluginHubStore: ObservableObject {
@@ -15,6 +18,7 @@ final class PluginHubStore: ObservableObject {
     private let sharedDataStore: SharedDataStore
     private let cardStateStore: CardStateStore
     private let notificationManager: NotificationManager
+    private let widgetDataStore: WidgetDataStore
     private let executor: PluginExecutor
     private var refreshTasks: [UUID: Task<Void, Never>] = [:]
     private var fileMonitors: [UUID: DispatchSourceFileSystemObject] = [:]
@@ -30,6 +34,7 @@ final class PluginHubStore: ObservableObject {
         sharedDataStore: SharedDataStore = SharedDataStore(),
         cardStateStore: CardStateStore = CardStateStore(),
         notificationManager: NotificationManager = NotificationManager(),
+        widgetDataStore: WidgetDataStore = WidgetDataStore(),
         executor: PluginExecutor = PluginExecutor()
     ) {
         self.configStore = configStore
@@ -37,6 +42,7 @@ final class PluginHubStore: ObservableObject {
         self.sharedDataStore = sharedDataStore
         self.cardStateStore = cardStateStore
         self.notificationManager = notificationManager
+        self.widgetDataStore = widgetDataStore
         self.executor = executor
         var didLoadConfiguration = false
         do {
@@ -62,6 +68,7 @@ final class PluginHubStore: ObservableObject {
         loadCachedStates()
         startSchedulers()
         startFileMonitors()
+        updateWidgetPluginList()
     }
 
     deinit {
@@ -235,6 +242,7 @@ final class PluginHubStore: ObservableObject {
                 )
                 stateStore.save(stateID: plugin.stateID, state: cached)
                 sharedDataStore.save(stateID: plugin.stateID, state: cached)
+                widgetDataStore.saveSnapshot(stateID: plugin.stateID, cached: cached)
             }
         }
     }
@@ -447,6 +455,37 @@ final class PluginHubStore: ObservableObject {
               index < configuration.plugins.count - 1 else { return }
         configuration.plugins.swapAt(index, index + 1)
         saveConfiguration()
+    }
+
+    // MARK: - Widget
+
+    private func updateWidgetPluginList() {
+        let infos = configuration.plugins.compactMap { plugin -> WidgetPluginInfo? in
+            guard plugin.enabled else { return nil }
+            let snapshot = snapshots[plugin.id]
+            let components = (snapshot?.components ?? []).enumerated().compactMap { idx, comp -> WidgetComponentInfo? in
+                switch comp {
+                case .progress(let c):
+                    return WidgetComponentInfo(id: c.id, label: c.label, type: "progress")
+                case .text(let c):
+                    return WidgetComponentInfo(id: c.id, label: c.content, type: "text")
+                case .list(let c):
+                    return WidgetComponentInfo(id: c.id, label: c.title ?? "", type: "list")
+                default:
+                    return nil
+                }
+            }
+            return WidgetPluginInfo(
+                pluginID: plugin.stateID,
+                pluginName: plugin.name,
+                icon: plugin.metadata?.icon,
+                components: components
+            )
+        }
+        widgetDataStore.savePluginList(infos)
+        #if canImport(WidgetKit)
+        WidgetCenter.shared.reloadAllTimelines()
+        #endif
     }
 
     // MARK: - 通知

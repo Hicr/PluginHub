@@ -1,7 +1,7 @@
 import SwiftUI
 
 extension Color {
-    static func from(hex: String?, fallback: Color) -> Color {
+    public static func from(hex: String?, fallback: Color) -> Color {
         guard let hex else { return fallback }
 
         // 先检查是否为命名的颜色名

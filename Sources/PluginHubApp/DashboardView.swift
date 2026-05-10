@@ -365,13 +365,16 @@ struct ComponentGroupView: View {
         let count = components.count
         while idx < count {
             let remaining = count - idx
-            // 第一个是 text 且总数 >= 5：text 独占一行，其余 4 个一行
-            if idx == 0, case .text = components[idx], remaining >= 5 {
+            // 服务器监控：text 标签独占首行，后面 4 个一行
+            if idx == 0, case .text = components[idx], remaining == 5 {
                 result.append(.row([components[idx]]))
                 idx += 1
-            } else if remaining >= 4 {
+            } else if idx == 1, case .text = components[0], remaining == 4 {
                 result.append(.row(Array(components[idx..<idx+4])))
                 idx += 4
+            } else if remaining >= 3 {
+                result.append(.row(Array(components[idx..<idx+3])))
+                idx += 3
             } else if remaining >= 2 {
                 result.append(.row(Array(components[idx..<idx+remaining])))
                 idx += remaining

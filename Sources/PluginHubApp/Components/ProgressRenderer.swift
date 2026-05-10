@@ -10,10 +10,12 @@ struct ProgressRenderer: View {
                 Text(component.label)
                     .font(.caption)
                     .foregroundColor(.secondary)
-                Spacer()
-                Text(formattedValue)
-                    .font(.caption)
-                    .monospacedDigit()
+                if component.style != .ring {
+                    Spacer()
+                    Text(formattedValue)
+                        .font(.caption)
+                        .monospacedDigit()
+                }
             }
 
             switch component.style {

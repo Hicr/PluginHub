@@ -28,16 +28,9 @@ struct ScratchCardOverlay: View {
                         .foregroundColor(.white.opacity(0.6))
                 }
 
-                // 刮开区域 = 用 destinationOut 擦除灰色
-                ForEach(Array(scratched), id: \.self) { idx in
-                    let c = idx % gridSize
-                    let r = idx / gridSize
-                    RoundedRectangle(cornerRadius: 2)
-                        .frame(width: cellW, height: cellH)
-                        .position(x: CGFloat(c) * cellW + cellW / 2,
-                                  y: CGFloat(r) * cellH + cellH / 2)
-                        .blendMode(.destinationOut)
-                }
+                // 刮开区域 = 用单条 Path 连续擦除，无缝隙
+                scratchPath(cellW: cellW, cellH: cellH)
+                    .blendMode(.destinationOut)
             }
             .compositingGroup()
             .opacity(isRevealed ? 0 : 1)
@@ -50,6 +43,22 @@ struct ScratchCardOverlay: View {
                     }
             )
         }
+    }
+
+    private func scratchPath(cellW: CGFloat, cellH: CGFloat) -> Path {
+        var path = Path()
+        for idx in scratched {
+            let c = idx % gridSize
+            let r = idx / gridSize
+            let rect = CGRect(
+                x: CGFloat(c) * cellW,
+                y: CGFloat(r) * cellH,
+                width: cellW + 1,
+                height: cellH + 1
+            )
+            path.addRect(rect)
+        }
+        return path
     }
 
     private func scratch(at point: CGPoint, cellW: CGFloat, cellH: CGFloat) {
