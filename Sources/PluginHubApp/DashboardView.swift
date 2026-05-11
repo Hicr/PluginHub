@@ -99,10 +99,13 @@ private struct HeaderView: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: "puzzlepiece.fill")
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(.secondary)
-                .frame(width: 20, height: 20)
+            if let url = Bundle.main.url(forResource: "menubar-icon", withExtension: "png"),
+               let nsImage = NSImage(contentsOf: url) {
+                Image(nsImage: nsImage)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 20, height: 20)
+            }
             Text("PluginHub")
                 .font(.system(size: 15, weight: .semibold))
             Spacer()

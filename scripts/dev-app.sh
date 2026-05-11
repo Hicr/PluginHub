@@ -18,6 +18,8 @@ mkdir -p "$APP_DIR/Contents/Resources"
 
 cp "$BUILD_DIR/PluginHub" "$APP_DIR/Contents/MacOS/"
 cp "Resources/PluginAuthoringGuide.html" "$APP_DIR/Contents/Resources/" 2>/dev/null || true
+cp "Resources/PluginHub.icns" "$APP_DIR/Contents/Resources/" 2>/dev/null || true
+cp "Resources/menubar-icon.png" "$APP_DIR/Contents/Resources/" 2>/dev/null || true
 cp -r "Resources/BundledPlugins" "$APP_DIR/Contents/Resources/Plugins" 2>/dev/null || true
 
 # 创建主 App Info.plist
@@ -38,6 +40,8 @@ cat > "$APP_DIR/Contents/Info.plist" << 'PLIST'
     <string>1.0.0</string>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
+    <key>CFBundleIconFile</key>
+    <string>PluginHub</string>
     <key>LSUIElement</key>
     <true/>
 </dict>

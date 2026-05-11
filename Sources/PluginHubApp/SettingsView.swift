@@ -122,7 +122,7 @@ struct GeneralSettingsView: View {
 
                         Divider().padding(.leading, 14)
 
-                        settingsRow("毛玻璃") {
+                        settingsRow(glassEffectLabel) {
                             Toggle("", isOn: Binding(
                                 get: { store.configuration.visualEffect.enabled },
                                 set: {
@@ -184,6 +184,13 @@ struct GeneralSettingsView: View {
         case .light: return "浅色"
         case .dark: return "深色"
         }
+    }
+
+    private var glassEffectLabel: String {
+        if #available(macOS 26, *) {
+            return "液态玻璃"
+        }
+        return "毛玻璃"
     }
 
 }

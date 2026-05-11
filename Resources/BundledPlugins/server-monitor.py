@@ -21,6 +21,10 @@
 #           value: iTerm
 #         - label: Ghostty
 #           value: Ghostty
+#     - name: auto_retry
+#       type: boolean
+#       label: 断联后自动重试
+#       default: "false"
 # /PluginHub
 
 import json
@@ -162,6 +166,7 @@ def usage_color(pct):
 params = parse_params(sys.argv[1:])
 servers_raw = params.get("servers", "[]")
 terminal_choice = params.get("terminal", "自动")
+auto_retry = params.get("auto_retry", "false").lower() in ("true", "1", "yes")
 
 try:
     servers = json.loads(servers_raw)
@@ -193,41 +198,45 @@ for srv in servers:
     name = srv.get("name", host)
     server_id = f"{user}@{host}:{port}"
 
-    # 之前失败过 → 跳过自动检测
+    # 之前失败过
     if server_id in failed_servers:
-        components.append({
-            "type": "text",
-            "data": {
-                "id": f"err-{host}",
-                "content": f"{name}  连接失败",
-                "style": "alert",
-                "icon": "xmark.circle.fill"
-            }
-        })
-        new_failed.append(server_id)
-        key_path = os.path.expanduser(key)
-        # 测试连接 callback: 成功后清除失败状态
-        fix_cmd = (
-            f"ssh -o ConnectTimeout=5 -o BatchMode=yes -o StrictHostKeyChecking=no "
-            f"-p {port} -i {key_path} {user}@{host} echo ok "
-            f"&& python3 -c \"import json; d=json.load(open('{STATE_FILE}')); "
-            f"d['failed'].remove('{server_id}'); json.dump(d, open('{STATE_FILE}','w'))\" 2>/dev/null; true"
-        )
-        components.append({
-            "type": "interactive",
-            "data": {
-                "id": f"btn-{host}",
-                "type": "button",
-                "config": {
-                    "actions": [
-                        {"id": "test", "label": "测试连接", "type": "callback", "payload": fix_cmd},
-                    ]
+        if auto_retry:
+            # 开启自动重试：尝试重连，以正常检测逻辑为准
+            pass
+        else:
+            # 未开启自动重试：跳过自动检测，等待手动测试连接
+            components.append({
+                "type": "text",
+                "data": {
+                    "id": f"err-{host}",
+                    "content": f"{name}  连接失败",
+                    "style": "alert",
+                    "icon": "xmark.circle.fill"
                 }
-            }
-        })
-        continue
+            })
+            new_failed.append(server_id)
+            key_path = os.path.expanduser(key)
+            fix_cmd = (
+                f"ssh -o ConnectTimeout=5 -o BatchMode=yes -o StrictHostKeyChecking=no "
+                f"-p {port} -i {key_path} {user}@{host} echo ok "
+                f"&& python3 -c \"import json; d=json.load(open('{STATE_FILE}')); "
+                f"d['failed'].remove('{server_id}'); json.dump(d, open('{STATE_FILE}','w'))\" 2>/dev/null; true"
+            )
+            components.append({
+                "type": "interactive",
+                "data": {
+                    "id": f"btn-{host}",
+                    "type": "button",
+                    "config": {
+                        "actions": [
+                            {"id": "test", "label": "测试连接", "type": "callback", "payload": fix_cmd},
+                        ]
+                    }
+                }
+            })
+            continue
 
-    # 正常检测
+    # 检测连接（正常检测 / auto_retry 重试）
     test_out, test_err = ssh_cmd(host, port, user, key, "echo ok")
 
     if test_err:
