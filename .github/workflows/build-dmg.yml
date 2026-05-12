@@ -1,0 +1,122 @@
+name: Build DMG
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Release
+        run: |
+          swift build -c release --product PluginHub
+          swift build -c release --product PluginHubWidget
+
+      - name: Package App Bundle
+        run: |
+          APP_NAME="PluginHub"
+          BUILD_DIR=".build/release"
+          APP_DIR="$BUILD_DIR/${APP_NAME}.app"
+
+          mkdir -p "$APP_DIR/Contents/MacOS"
+          mkdir -p "$APP_DIR/Contents/Resources"
+
+          cp "$BUILD_DIR/${APP_NAME}" "$APP_DIR/Contents/MacOS/"
+          cp "Resources/PluginHub.icns" "$APP_DIR/Contents/Resources/" || true
+          cp "Resources/menubar-icon.png" "$APP_DIR/Contents/Resources/" || true
+          cp "Resources/PluginAuthoringGuide.html" "$APP_DIR/Contents/Resources/" || true
+          cp -r "Resources/BundledPlugins" "$APP_DIR/Contents/Resources/Plugins" || true
+
+          cat > "$APP_DIR/Contents/Info.plist" << 'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleExecutable</key>
+              <string>PluginHub</string>
+              <key>CFBundleIdentifier</key>
+              <string>com.pluginhub.app</string>
+              <key>CFBundleName</key>
+              <string>PluginHub</string>
+              <key>CFBundleVersion</key>
+              <string>1.0.0</string>
+              <key>CFBundleShortVersionString</key>
+              <string>1.0.0</string>
+              <key>LSMinimumSystemVersion</key>
+              <string>13.0</string>
+              <key>CFBundleIconFile</key>
+              <string>PluginHub</string>
+              <key>LSUIElement</key>
+              <true/>
+          </dict>
+          </plist>
+          PLIST
+
+          # Widget
+          WIDGET_BIN="$BUILD_DIR/PluginHubWidget"
+          if [ -f "$WIDGET_BIN" ]; then
+            WIDGET_DIR="$APP_DIR/Contents/PlugIns/PluginHubWidget.appex"
+            mkdir -p "$WIDGET_DIR/Contents/MacOS"
+            cp "$WIDGET_BIN" "$WIDGET_DIR/Contents/MacOS/PluginHubWidget"
+            cat > "$WIDGET_DIR/Contents/Info.plist" << 'WPLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleExecutable</key>
+              <string>PluginHubWidget</string>
+              <key>CFBundleIdentifier</key>
+              <string>com.pluginhub.app.widget</string>
+              <key>CFBundleName</key>
+              <string>PluginHubWidget</string>
+              <key>CFBundleVersion</key>
+              <string>1.0.0</string>
+              <key>CFBundleShortVersionString</key>
+              <string>1.0.0</string>
+              <key>CFBundlePackageType</key>
+              <string>XPC!</string>
+              <key>CFBundleSupportedPlatforms</key>
+              <array><string>MacOSX</string></array>
+              <key>LSMinimumSystemVersion</key>
+              <string>14.0</string>
+              <key>WKAppBundleIdentifier</key>
+              <string>com.pluginhub.app</string>
+              <key>NSExtension</key>
+              <dict>
+                  <key>NSExtensionPointIdentifier</key>
+                  <string>com.apple.widgetkit-extension</string>
+                  <key>NSExtensionPrincipalClass</key>
+                  <string>PluginHubWidget.PluginHubWidgetBundle</string>
+              </dict>
+          </dict>
+          </plist>
+          WPLIST
+          fi
+
+      - name: Ad-hoc Sign
+        run: |
+          APP_DIR=".build/release/PluginHub.app"
+          if [ -d "$APP_DIR/Contents/PlugIns/PluginHubWidget.appex" ]; then
+            codesign --force --sign - "$APP_DIR/Contents/PlugIns/PluginHubWidget.appex"
+          fi
+          codesign --force --deep --sign - "$APP_DIR"
+
+      - name: Create DMG
+        run: |
+          mkdir -p .build/dmg-stage
+          cp -R .build/release/PluginHub.app .build/dmg-stage/
+          ln -s /Applications .build/dmg-stage/Applications
+          hdiutil create -volname "PluginHub" \
+            -srcfolder .build/dmg-stage \
+            -ov -format UDZO \
+            PluginHub.dmg
+
+      - name: Upload DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: PluginHub.dmg
+          path: PluginHub.dmg
