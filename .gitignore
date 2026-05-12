@@ -13,6 +13,9 @@
 CLAUDE.md
 AGENTS.md
 
+# Docs (local only)
+docs/
+
 # IDE
 .vscode/
 .idea/
