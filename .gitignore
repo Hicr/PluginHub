@@ -1,6 +1,7 @@
 # Build
 .build/
 *.app/
+*.dmg
 
 # macOS
 .DS_Store
