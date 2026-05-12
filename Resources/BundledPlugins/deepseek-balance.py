@@ -55,7 +55,7 @@ params = parse_params(sys.argv[1:])
 api_key = params.get("API_KEY", "").strip()
 
 if not api_key:
-    print(json.dumps({"error": "缺少 API_KEY"}))
+    print("缺少 API_KEY，请在插件设置中配置 DeepSeek API Key", file=sys.stderr)
     sys.exit(1)
 
 try:
@@ -67,10 +67,10 @@ try:
         data = json.loads(resp.read())
 except urllib.error.HTTPError as e:
     body = e.read().decode("utf-8", errors="replace")
-    print(json.dumps({"error": f"HTTP {e.code}: {body}"}))
+    print(f"HTTP {e.code}: {body}", file=sys.stderr)
     sys.exit(1)
 except Exception as e:
-    print(json.dumps({"error": str(e)}))
+    print(str(e), file=sys.stderr)
     sys.exit(1)
 
 available = data.get("is_available", True)
