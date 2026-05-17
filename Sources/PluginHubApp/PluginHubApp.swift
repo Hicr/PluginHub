@@ -7,10 +7,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     let store = PluginHubStore()
     private var statusItem: NSStatusItem?
     private var popover: NSPopover?
-    private var popoverHostingController: NSViewController?
-    private var globalClickMonitor: Any?
-    private var localClickMonitor: Any?
     private var settingsWindowController: NSWindowController?
+    private var clickMonitor: Any?
+    private var localClickMonitor: Any?
+    private var escMonitor: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Self.shared = self
@@ -62,19 +62,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             return
         }
 
-        let hostingController: NSViewController
-        if let cached = popoverHostingController {
-            hostingController = cached
-        } else {
-            let vc = NSHostingController(
-                rootView: DashboardView(store: store) { [weak self] newSize in
-                    self?.updateContentSize(newSize)
-                }
-                .frame(width: 400)
-            )
-            popoverHostingController = vc
-            hostingController = vc
-        }
+        let hostingController = NSHostingController(
+            rootView: DashboardView(store: store) { [weak self] newSize in
+                self?.updateContentSize(newSize)
+            }
+            .frame(width: 400)
+        )
         hostingController.view.appearance = NSApp.effectiveAppearance
 
         let contentWidth = DashboardView.contentWidth
@@ -89,8 +82,68 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         popover.contentViewController = hostingController
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         self.popover = popover
-        startGlobalClickMonitor()
+
+        NSApp.activate(ignoringOtherApps: true)
+
+        startMonitors()
     }
+
+    // MARK: - Event Monitors
+
+    private func startMonitors() {
+        stopMonitors()
+
+        clickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
+            DispatchQueue.main.async {
+                self?.closePopoverIfNeeded(event: event)
+            }
+        }
+
+        localClickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
+            self?.closePopoverIfNeeded(event: event)
+            return event
+        }
+
+        escMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            if event.keyCode == 53 {
+                self?.popover?.performClose(nil)
+                return nil
+            }
+            return event
+        }
+    }
+
+    private func stopMonitors() {
+        if let monitor = clickMonitor {
+            NSEvent.removeMonitor(monitor)
+            clickMonitor = nil
+        }
+        if let monitor = localClickMonitor {
+            NSEvent.removeMonitor(monitor)
+            localClickMonitor = nil
+        }
+        if let monitor = escMonitor {
+            NSEvent.removeMonitor(monitor)
+            escMonitor = nil
+        }
+    }
+
+    private func closePopoverIfNeeded(event: NSEvent) {
+        guard let popover, popover.isShown else { return }
+        if let button = statusItem?.button,
+           let window = event.window,
+           window === button.window {
+            return
+        }
+        if let popoverWindow = popover.contentViewController?.view.window,
+           let window = event.window,
+           window === popoverWindow {
+            return
+        }
+        popover.performClose(nil)
+    }
+
+    // MARK: - Content Size
 
     private func updateContentSize(_ size: NSSize) {
         let width = DashboardView.contentWidth
@@ -111,52 +164,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         return NSSize(width: width, height: height)
     }
 
-    private func startGlobalClickMonitor() {
-        stopGlobalClickMonitor()
-
-        globalClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
-            DispatchQueue.main.async {
-                self?.closePopoverIfNeeded(event: event)
-            }
-        }
-
-        localClickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
-            self?.closePopoverIfNeeded(event: event)
-            return event
-        }
-    }
-
-    private func closePopoverIfNeeded(event: NSEvent) {
-        guard let eventWindow = event.window else {
-            // 系统级事件（如菜单栏点击），不关闭弹窗
-            return
-        }
-        // 检查菜单栏按钮
-        if let button = statusItem?.button,
-           eventWindow === button.window {
-            return
-        }
-        // 检查 popover
-        if let popover, popover.isShown,
-           let popoverWindow = popover.contentViewController?.view.window,
-           eventWindow === popoverWindow {
-            return
-        }
-        // 关闭
-        popover?.performClose(nil)
-        stopGlobalClickMonitor()
-    }
-
-    private func stopGlobalClickMonitor() {
-        if let monitor = globalClickMonitor {
-            NSEvent.removeMonitor(monitor)
-            globalClickMonitor = nil
-        }
-        if let monitor = localClickMonitor {
-            NSEvent.removeMonitor(monitor)
-            localClickMonitor = nil
-        }
-    }
+    // MARK: - Actions
 
     @objc private func togglePopover() {
         showPopover()
@@ -166,7 +174,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         if let popover, popover.isShown {
             popover.performClose(nil)
         }
-        stopGlobalClickMonitor()
         if let controller = settingsWindowController, let window = controller.window, !window.isReleasedWhenClosed {
             window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
@@ -191,8 +198,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     // MARK: - NSPopoverDelegate
 
     func popoverDidClose(_ notification: Notification) {
-        stopGlobalClickMonitor()
+        stopMonitors()
         popover = nil
+        NSApp.deactivate()
     }
 
     // MARK: - NSWindowDelegate
