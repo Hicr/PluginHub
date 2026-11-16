@@ -9,9 +9,9 @@ import json
 import subprocess
 import os
 import time
+import tempfile
+from pathlib import Path
 from datetime import datetime, timezone
-
-TEMP_FILE = "/tmp/pluginhub_net_bytes.json"
 
 
 def run_cmd(cmd, timeout=5):
@@ -55,60 +55,64 @@ def get_memory_usage():
 
 
 def get_disk_info():
-    out = run_cmd(["df", "-H", "/"])
-    for line in out.split("\n"):
-        parts = line.split()
-        if len(parts) >= 9 and parts[0].startswith("/dev/"):
-            pct = int(parts[4].replace("%", "")) if parts[4].endswith("%") else 0
-            # 容量用 GiB (/1024) 显示
-            try:
-                total_blocks = int(parts[1].replace("Gi", "").replace("G", "")) if any(c.isdigit() for c in parts[1]) else 0
-                avail_blocks = int(parts[3].replace("Gi", "").replace("G", "")) if any(c.isdigit() for c in parts[3]) else 0
-            except ValueError:
-                total_blocks = 0
-                avail_blocks = 0
-            return pct, avail_blocks, total_blocks
-    return None, None, None
+    try:
+        stats = os.statvfs("/")
+    except OSError:
+        return None, None, None
+    if not stats.f_blocks:
+        return None, None, None
+    available = stats.f_bavail * stats.f_frsize / 2**30
+    total = stats.f_blocks * stats.f_frsize / 2**30
+    percent = round(100 * (1 - stats.f_bavail / stats.f_blocks))
+    return percent, available, total
 
 
 def get_network_speed():
-    out = run_cmd(["netstat", "-ib"])
-    rx_total = tx_total = 0
-    for line in out.split("\n"):
-        parts = line.split()
-        if len(parts) >= 10:
-            if parts[0] in ("lo0", "Name", "anpi"):
-                continue
-            try:
-                rx_total += int(parts[6])
-                tx_total += int(parts[9])
-            except ValueError:
-                continue
-    if rx_total == 0:
+    counters = {}
+    for line in run_cmd(["/usr/sbin/netstat", "-ibn"]).splitlines():
+        fields = line.split()
+        if len(fields) < 10 or not fields[2].startswith("<Link#"):
+            continue
+        name = fields[0].rstrip("*")
+        if name.startswith(("lo", "utun", "awdl", "llw", "anpi")):
+            continue
+        try:
+            counters[name] = (int(fields[-5]), int(fields[-2]))
+        except ValueError:
+            continue
+
+    trigger = os.environ.get("PLUGINHUB_TRIGGER_FILE")
+    if not counters or not trigger:
         return None, None
 
-    prev = {}
-    if os.path.exists(TEMP_FILE):
-        try:
-            with open(TEMP_FILE) as f:
-                prev = json.load(f)
-        except Exception:
-            pass
-
-    now = time.time()
-    down = up = None
-    if prev.get("rx") is not None and prev.get("ts"):
-        elapsed = now - prev["ts"]
-        if elapsed > 0:
-            down = int((rx_total - prev["rx"]) / elapsed)
-            up = int((tx_total - prev["tx"]) / elapsed)
-
+    state_file = Path(trigger).with_suffix(".network.json")
+    now = time.monotonic()
+    rates = None, None
     try:
-        with open(TEMP_FILE, "w") as f:
-            json.dump({"rx": rx_total, "tx": tx_total, "ts": now}, f)
-    except Exception:
+        previous = json.loads(state_file.read_text())
+        elapsed = now - previous["time"]
+        if elapsed > 0:
+            deltas = []
+            for name, (incoming, outgoing) in counters.items():
+                old = previous["counters"].get(name)
+                if old is not None and incoming >= old[0] and outgoing >= old[1]:
+                    deltas.append((incoming - old[0], outgoing - old[1]))
+            if deltas:
+                rates = tuple(int(sum(direction) / elapsed) for direction in zip(*deltas))
+    except (OSError, ValueError, TypeError, KeyError, AttributeError, IndexError):
         pass
-    return down, up
+
+    temporary_path = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", dir=state_file.parent, delete=False) as temporary:
+            temporary_path = Path(temporary.name)
+            json.dump({"time": now, "counters": counters}, temporary)
+        temporary_path.replace(state_file)
+    except OSError:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+
+    return rates
 
 
 def fmt_speed(b):
@@ -193,7 +197,7 @@ if memory is not None:
     })
 
 # 磁盘 进度条 + 容量信息
-if disk_pct is not None and disk_avail and disk_total:
+if disk_pct is not None:
     components.append({
         "type": "progress",
         "data": {
@@ -201,7 +205,7 @@ if disk_pct is not None and disk_avail and disk_total:
             "label": "磁盘",
             "value": disk_pct,
             "max": 100,
-            "unit": f"{disk_avail}G / {disk_total}G",
+            "unit": f"{disk_avail:.1f} / {disk_total:.1f} GiB 可用",
             "color": usage_color(disk_pct),
             "style": "bar"
         }

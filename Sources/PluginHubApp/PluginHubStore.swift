@@ -8,6 +8,7 @@ import WidgetKit
 
 @MainActor
 final class PluginHubStore: ObservableObject {
+    let networkUsage = NetworkUsage()
     @Published var configuration: AppConfiguration
     @Published private(set) var snapshots: [UUID: PluginSnapshot] = [:]
     @Published var lastError: String?
@@ -61,6 +62,7 @@ final class PluginHubStore: ObservableObject {
             lastError = "内置插件安装失败：\(error.localizedDescription)"
         }
         syncMissingPluginsFromDirectory()
+        registerNetworkUsage()
         reloadAllMetadata()
         try? configStore.save(configuration)
         loadCardStates()
@@ -110,6 +112,25 @@ final class PluginHubStore: ObservableObject {
         } catch {
             lastError = "配置保存失败：\(error.localizedDescription)"
         }
+    }
+
+    private func registerNetworkUsage() {
+        guard !configuration.plugins.contains(where: { $0.stateID == NetworkUsage.pluginStateID }) else { return }
+        let defaults = UserDefaults.standard
+        let continuous = defaults.object(forKey: "networkContinuous") as? Bool ?? true
+        let interval = max(1, defaults.object(forKey: "networkInterval") as? Int ?? 5)
+        configuration.plugins.append(PluginConfiguration(
+            stateID: NetworkUsage.pluginStateID,
+            name: "应用网络用量",
+            executablePath: "",
+            refreshIntervalSeconds: interval,
+            metadata: PluginMetadata(
+                name: "应用网络用量",
+                description: "按应用显示实时网速和今日网络用量",
+                icon: "network"
+            ),
+            parameterValues: [NetworkUsage.continuousKey: String(continuous)]
+        ))
     }
 
     func addPlugin(fileURL: URL) {
@@ -163,6 +184,7 @@ final class PluginHubStore: ObservableObject {
         lastError = nil
         saveConfiguration()
 
+        guard configuration.plugins[index].stateID != NetworkUsage.pluginStateID else { return }
         snapshots[id] = makeSnapshot(
             for: configuration.plugins[index],
             state: .loading,
@@ -174,6 +196,7 @@ final class PluginHubStore: ObservableObject {
 
     func reloadMetadata(pluginID: UUID) {
         guard let index = configuration.plugins.firstIndex(where: { $0.id == pluginID }) else { return }
+        guard configuration.plugins[index].stateID != NetworkUsage.pluginStateID else { return }
         let fileURL = URL(fileURLWithPath: configuration.plugins[index].executablePath)
         let metadata = PluginMetadataParser.parse(fileURL: fileURL)
         configuration.plugins[index].metadata = metadata
@@ -191,6 +214,7 @@ final class PluginHubStore: ObservableObject {
 
     func removePlugin(id: UUID) {
         guard let index = configuration.plugins.firstIndex(where: { $0.id == id }) else { return }
+        guard configuration.plugins[index].stateID != NetworkUsage.pluginStateID else { return }
         configuration.plugins.remove(at: index)
         snapshots.removeValue(forKey: id)
         refreshTasks[id]?.cancel()
@@ -206,6 +230,10 @@ final class PluginHubStore: ObservableObject {
 
     func refresh(pluginID: UUID, force: Bool = false) {
         guard let plugin = configuration.plugins.first(where: { $0.id == pluginID }) else { return }
+        if plugin.stateID == NetworkUsage.pluginStateID {
+            networkUsage.refresh()
+            return
+        }
         guard plugin.enabled else { return }
         guard force || stateStore.needsRefresh(stateID: plugin.stateID, intervalSeconds: plugin.refreshIntervalSeconds) else { return }
 
@@ -350,7 +378,11 @@ final class PluginHubStore: ObservableObject {
         refreshTasks.values.forEach { $0.cancel() }
         refreshTasks = [:]
 
-        for plugin in configuration.plugins where plugin.enabled {
+        if let plugin = configuration.plugins.first(where: { $0.stateID == NetworkUsage.pluginStateID }) {
+            networkUsage.configure(plugin)
+        }
+
+        for plugin in configuration.plugins where plugin.enabled && plugin.stateID != NetworkUsage.pluginStateID {
             let id = plugin.id
             let interval = max(plugin.refreshIntervalSeconds, 5)
             let hasCached = stateStore.load(stateID: plugin.stateID) != nil
@@ -376,7 +408,7 @@ final class PluginHubStore: ObservableObject {
     }
 
     private func refreshPluginsAfterConfigurationChange() {
-        for plugin in configuration.plugins where plugin.enabled {
+        for plugin in configuration.plugins where plugin.enabled && plugin.stateID != NetworkUsage.pluginStateID {
             let snapshot = snapshots[plugin.id]
             let hasCached = stateStore.load(stateID: plugin.stateID) != nil
             let shouldRefresh = !hasCached || snapshot?.state == .loading || isFailed(snapshot?.state)
@@ -461,7 +493,7 @@ final class PluginHubStore: ObservableObject {
 
     private func updateWidgetPluginList() {
         let infos = configuration.plugins.compactMap { plugin -> WidgetPluginInfo? in
-            guard plugin.enabled else { return nil }
+            guard plugin.enabled, plugin.stateID != NetworkUsage.pluginStateID else { return nil }
             let snapshot = snapshots[plugin.id]
             let components = (snapshot?.components ?? []).enumerated().compactMap { idx, comp -> WidgetComponentInfo? in
                 switch comp {
@@ -505,7 +537,7 @@ final class PluginHubStore: ObservableObject {
         fileMonitors.values.forEach { $0.cancel() }
         fileMonitors = [:]
 
-        for plugin in configuration.plugins {
+        for plugin in configuration.plugins where plugin.stateID != NetworkUsage.pluginStateID {
             let path = triggerFilePath(for: plugin.stateID)
             // 确保 trigger 文件存在
             if !FileManager.default.fileExists(atPath: path) {

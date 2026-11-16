@@ -35,21 +35,22 @@ struct DashboardView: View {
                     ScrollView {
                         LazyVStack(spacing: 10) {
                             ForEach(Array(enabledPlugins.enumerated()), id: \.element.id) { index, plugin in
-                                PluginCardView(
-                                    snapshot: store.snapshot(for: plugin),
-                                    isExpanded: store.cardExpandedStates[plugin.id] ?? true,
-                                    isFirst: index == 0,
-                                    isLast: index == enabledPlugins.count - 1,
-                                    onToggle: { store.toggleCardExpanded(pluginID: plugin.id) },
-                                    onMoveUp: { store.movePluginUp(pluginID: plugin.id) },
-                                    onMoveDown: { store.movePluginDown(pluginID: plugin.id) },
-                                    onRefresh: {
-                                        store.refresh(pluginID: plugin.id, force: true)
-                                    },
-                                    onInteract: {
-                                        store.refresh(pluginID: plugin.id, force: true)
-                                    }
-                                )
+                                if plugin.stateID == NetworkUsage.pluginStateID {
+                                    NetworkUsageCard(usage: store.networkUsage, title: plugin.name)
+                                } else {
+                                    PluginCardView(
+                                        snapshot: store.snapshot(for: plugin),
+                                        isExpanded: store.cardExpandedStates[plugin.id] ?? true,
+                                        isFirst: index == 0,
+                                        isLast: index == enabledPlugins.count - 1,
+                                        onToggle: { store.toggleCardExpanded(pluginID: plugin.id) },
+                                        onMoveUp: { store.movePluginUp(pluginID: plugin.id) },
+                                        onMoveDown: { store.movePluginDown(pluginID: plugin.id) },
+                                        onRefresh: { store.refresh(pluginID: plugin.id, force: true) },
+                                        onInteract: { store.refresh(pluginID: plugin.id, force: true) },
+                                        presentation: PluginCardPresentation(executablePath: plugin.executablePath)
+                                    )
+                                }
                             }
                         }
                         .padding(10)
@@ -59,6 +60,8 @@ struct DashboardView: View {
             }
             .clipShape(RoundedRectangle(cornerRadius: 16))
         }
+        .onAppear { store.networkUsage.visible = true }
+        .onDisappear { store.networkUsage.visible = false }
         .background(backgroundView)
         .background(
             GeometryReader { proxy in
@@ -168,6 +171,27 @@ private struct EmptyPluginsView: View {
 
 // MARK: - Plugin Card
 
+enum PluginCardPresentation {
+    case systemMonitor
+    case deepSeek
+
+    init?(executablePath: String) {
+        switch URL(fileURLWithPath: executablePath).lastPathComponent {
+        case "system-monitor.py": self = .systemMonitor
+        case "deepseek-balance.py": self = .deepSeek
+        default: return nil
+        }
+    }
+}
+
+struct NetworkCardBackground: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .padding(12)
+            .background(.quaternary, in: RoundedRectangle(cornerRadius: 12))
+    }
+}
+
 struct PluginCardView: View {
     var snapshot: PluginSnapshot
     var isExpanded: Bool = true
@@ -178,8 +202,24 @@ struct PluginCardView: View {
     var onMoveDown: (() -> Void)?
     var onRefresh: (() -> Void)?
     var onInteract: (() -> Void)?
+    var presentation: PluginCardPresentation?
 
     var body: some View {
+        if presentation != nil {
+            cardContent.modifier(NetworkCardBackground())
+        } else {
+            cardContent
+                .padding(10)
+                .background(Color(nsColor: .controlBackgroundColor))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
+                }
+        }
+    }
+
+    private var cardContent: some View {
         VStack(alignment: .leading, spacing: 10) {
             // Header
             HStack(spacing: 6) {
@@ -206,6 +246,9 @@ struct PluginCardView: View {
 
                 Spacer()
 
+                if presentation != nil {
+                    refreshButton
+                }
                 statusView
 
                 // 上移
@@ -258,26 +301,20 @@ struct PluginCardView: View {
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.vertical, 12)
+                } else if presentation == .systemMonitor {
+                    SystemMonitorCardContent(components: snapshot.components)
+                } else if presentation == .deepSeek,
+                          case .text(let summary) = snapshot.components.first {
+                    let details: [ListComponent] = snapshot.components.compactMap {
+                        guard case .list(let detail) = $0 else { return nil }
+                        return detail
+                    }
+                    DeepSeekCardContent(summary: summary, details: details)
                 } else {
                     ComponentGroupView(components: snapshot.components, onAction: onInteract)
                 }
             }
         }
-        .padding(10)
-        .background(cardBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(cardStroke)
-    }
-
-    @ViewBuilder
-    private var cardBackground: some View {
-        Color(nsColor: .controlBackgroundColor)
-    }
-
-    @ViewBuilder
-    private var cardStroke: some View {
-        RoundedRectangle(cornerRadius: 8)
-            .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
     }
 
     @ViewBuilder
@@ -292,14 +329,9 @@ struct PluginCardView: View {
                 .controlSize(.small)
         case .ready:
             if let updatedAt = snapshot.updatedAt {
-                Button {
-                    onRefresh?()
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 10))
+                if presentation == nil {
+                    refreshButton
                 }
-                .buttonStyle(.borderless)
-                .foregroundStyle(.secondary)
                 Text(updatedAt, style: .relative)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -310,6 +342,19 @@ struct PluginCardView: View {
                 .lineLimit(1)
                 .foregroundStyle(.red)
         }
+    }
+
+    private var refreshButton: some View {
+        Button {
+            onRefresh?()
+        } label: {
+            Image(systemName: "arrow.clockwise")
+                .font(.system(size: 10))
+        }
+        .buttonStyle(.borderless)
+        .foregroundStyle(.secondary)
+        .disabled(snapshot.state == .loading)
+        .help("立即刷新")
     }
 
     private var emptyText: String {

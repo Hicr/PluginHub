@@ -310,7 +310,7 @@ struct PluginSettingsView: View {
                         .frame(width: 24, height: 24)
                 }
                 .buttonStyle(.borderless)
-                .disabled(selectedPluginID == nil)
+                .disabled(selectedPluginID == nil || draft?.stateID == NetworkUsage.pluginStateID)
 
                 Spacer()
 
@@ -379,28 +379,30 @@ struct PluginSettingsView: View {
                                     .textFieldStyle(.roundedBorder)
                             }
 
-                            pluginRow("脚本") {
-                                HStack(spacing: 4) {
-                                    TextField("Python 脚本路径", text: draftBinding.executablePath)
-                                        .textFieldStyle(.roundedBorder)
-                                    Button {
-                                        chooseExecutable()
-                                    } label: {
-                                        Image(systemName: "folder")
-                                            .font(.system(size: 12))
+                            if draft.stateID != NetworkUsage.pluginStateID {
+                                pluginRow("脚本") {
+                                    HStack(spacing: 4) {
+                                        TextField("Python 脚本路径", text: draftBinding.executablePath)
+                                            .textFieldStyle(.roundedBorder)
+                                        Button {
+                                            chooseExecutable()
+                                        } label: {
+                                            Image(systemName: "folder")
+                                                .font(.system(size: 12))
+                                        }
+                                        .buttonStyle(.borderless)
+                                        Button {
+                                            reloadDraftMetadata()
+                                        } label: {
+                                            Image(systemName: "arrow.clockwise")
+                                                .font(.system(size: 12))
+                                        }
+                                        .buttonStyle(.borderless)
                                     }
-                                    .buttonStyle(.borderless)
-                                    Button {
-                                        reloadDraftMetadata()
-                                    } label: {
-                                        Image(systemName: "arrow.clockwise")
-                                            .font(.system(size: 12))
-                                    }
-                                    .buttonStyle(.borderless)
                                 }
                             }
 
-                            pluginRow("刷新间隔") {
+                            pluginRow(draft.stateID == NetworkUsage.pluginStateID ? "采集间隔" : "刷新间隔") {
                                 HStack(spacing: 4) {
                                     TextField("秒", value: draftBinding.refreshIntervalSeconds, format: .number)
                                         .textFieldStyle(.roundedBorder)
@@ -412,6 +414,17 @@ struct PluginSettingsView: View {
                         }
                         .background(Color(nsColor: .controlBackgroundColor))
                         .clipShape(RoundedRectangle(cornerRadius: 8))
+
+                        if draft.stateID == NetworkUsage.pluginStateID {
+                            pluginRow("持续采集") {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Toggle("关闭 Dashboard 后继续采集", isOn: Binding(
+                                        get: { draftBinding.wrappedValue.parameterValues[NetworkUsage.continuousKey] != "false" },
+                                        set: { draftBinding.wrappedValue.parameterValues[NetworkUsage.continuousKey] = String($0) }
+                                    ))
+                                }
+                            }
+                        }
 
                         if let metadata = draft.metadata, !metadata.parameters.isEmpty {
                             VStack(alignment: .leading, spacing: 10) {
@@ -477,8 +490,13 @@ struct PluginSettingsView: View {
     }
 
     private func saveDraft() {
-        guard let draft else { return }
+        guard var draft else { return }
         guard let index = store.configuration.plugins.firstIndex(where: { $0.id == draft.id }) else { return }
+        draft.enabled = store.configuration.plugins[index].enabled
+        if draft.stateID == NetworkUsage.pluginStateID {
+            draft.refreshIntervalSeconds = max(1, draft.refreshIntervalSeconds)
+        }
+        self.draft = draft
         store.configuration.plugins[index] = draft
         store.saveConfiguration()
     }
