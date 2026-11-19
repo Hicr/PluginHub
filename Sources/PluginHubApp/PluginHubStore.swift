@@ -10,6 +10,7 @@ import WidgetKit
 final class PluginHubStore: ObservableObject {
     let networkUsage = NetworkUsage()
     let countdown = Countdown()
+    let powerMonitor = PowerMonitor()
     @Published var configuration: AppConfiguration
     @Published private(set) var snapshots: [UUID: PluginSnapshot] = [:]
     @Published var lastError: String?
@@ -65,6 +66,16 @@ final class PluginHubStore: ObservableObject {
         syncMissingPluginsFromDirectory()
         registerNetworkUsage()
         registerCountdown()
+        if !configuration.plugins.contains(where: { $0.stateID == PowerMonitor.pluginStateID }) {
+            configuration.plugins.append(PluginConfiguration(
+                stateID: PowerMonitor.pluginStateID,
+                name: "整机功率",
+                enabled: true,
+                executablePath: "",
+                refreshIntervalSeconds: 5,
+                metadata: PluginMetadata(name: "整机功率", description: "查看电源输入、电池及系统负载", icon: "bolt.fill")
+            ))
+        }
         reloadAllMetadata()
         try? configStore.save(configuration)
         loadCardStates()
@@ -251,7 +262,11 @@ final class PluginHubStore: ObservableObject {
             networkUsage.refresh()
             return
         }
-        if plugin.stateID == Countdown.pluginStateID { return }
+        if plugin.stateID == PowerMonitor.pluginStateID {
+            powerMonitor.refresh()
+            return
+        }
+        if plugin.isNativePlugin { return }
         guard plugin.enabled else { return }
         guard force || stateStore.needsRefresh(stateID: plugin.stateID, intervalSeconds: plugin.refreshIntervalSeconds) else { return }
 
@@ -398,6 +413,10 @@ final class PluginHubStore: ObservableObject {
 
         if let plugin = configuration.plugins.first(where: { $0.stateID == NetworkUsage.pluginStateID }) {
             networkUsage.configure(plugin)
+        }
+
+        if let plugin = configuration.plugins.first(where: { $0.stateID == PowerMonitor.pluginStateID }) {
+            powerMonitor.configure(plugin)
         }
 
         for plugin in configuration.plugins where plugin.enabled && !plugin.isNativePlugin {
@@ -582,6 +601,6 @@ final class PluginHubStore: ObservableObject {
 
 extension PluginConfiguration {
     var isNativePlugin: Bool {
-        stateID == NetworkUsage.pluginStateID || stateID == Countdown.pluginStateID
+        stateID == NetworkUsage.pluginStateID || stateID == Countdown.pluginStateID || stateID == PowerMonitor.pluginStateID
     }
 }

@@ -713,3 +713,48 @@ public struct CountdownState: Codable, Equatable, Sendable {
         return min(1, remaining(at: date) / duration)
     }
 }
+
+public struct PowerReading: Sendable {
+    public let batteryPercent: Int?
+    public let batteryWatts: Double?
+    public let batteryWattsEstimated: Bool
+    public let batteryTemperature: Double?
+    public let externalConnected: Bool?
+    public let inputWatts: Double?
+    public let loadWatts: Double?
+    public let adapterWatts: Double?
+    public let adapterName: String?
+
+    public init(registry: [String: Any], adapter: [String: Any]) {
+        func number(_ key: String, in values: [String: Any]) -> NSNumber? {
+            values[key] as? NSNumber
+        }
+        func positive(_ key: String, in values: [String: Any]) -> Double? {
+            guard let value = number(key, in: values)?.doubleValue, value.isFinite, value > 0 else { return nil }
+            return value
+        }
+        let telemetry = registry["PowerTelemetryData"] as? [String: Any] ?? [:]
+        let capacity = number("CurrentCapacity", in: registry)?.intValue
+        batteryPercent = capacity.flatMap { (0...100).contains($0) ? $0 : nil }
+        externalConnected = registry["ExternalConnected"] as? Bool
+        adapterWatts = positive("Watts", in: adapter)
+        adapterName = adapter["Name"] as? String
+        inputWatts = externalConnected == true ? positive("SystemPowerIn", in: telemetry).map { $0 / 1000 } : nil
+        loadWatts = positive("SystemLoad", in: telemetry).map { $0 / 1000 }
+        batteryTemperature = positive("Temperature", in: registry).map { $0 / 100 }
+        if let measured = number("BatteryPower", in: telemetry) {
+            // This field shares the input and system load telemetry snapshot.
+            batteryWatts = Double(measured.int64Value) / 1000
+            batteryWattsEstimated = false
+        } else if let millivolts = positive("Voltage", in: registry),
+           let current = number("InstantAmperage", in: registry) ?? number("Amperage", in: registry) {
+            // The registry can encode negative current as an unsigned 64-bit number.
+            let milliamps = current.int64Value
+            batteryWatts = Double(milliamps) * millivolts / 1_000_000
+            batteryWattsEstimated = true
+        } else {
+            batteryWatts = nil
+            batteryWattsEstimated = false
+        }
+    }
+}

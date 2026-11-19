@@ -403,7 +403,7 @@ struct PluginSettingsView: View {
                             }
 
                             if draft.stateID != Countdown.pluginStateID {
-                                pluginRow(draft.stateID == NetworkUsage.pluginStateID ? "采集间隔" : "刷新间隔") {
+                                pluginRow(draft.isNativePlugin ? "采集间隔" : "刷新间隔") {
                                     HStack(spacing: 4) {
                                         TextField("秒", value: draftBinding.refreshIntervalSeconds, format: .number)
                                             .textFieldStyle(.roundedBorder)
@@ -495,7 +495,7 @@ struct PluginSettingsView: View {
         guard var draft else { return }
         guard let index = store.configuration.plugins.firstIndex(where: { $0.id == draft.id }) else { return }
         draft.enabled = store.configuration.plugins[index].enabled
-        if draft.stateID == NetworkUsage.pluginStateID {
+        if draft.stateID == NetworkUsage.pluginStateID || draft.stateID == PowerMonitor.pluginStateID {
             draft.refreshIntervalSeconds = max(1, draft.refreshIntervalSeconds)
         }
         self.draft = draft

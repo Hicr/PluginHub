@@ -199,6 +199,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
 
     func popoverDidClose(_ notification: Notification) {
         store.networkUsage.visible = false
+        store.powerMonitor.visible = false
         stopMonitors()
         popover = nil
         NSApp.deactivate()

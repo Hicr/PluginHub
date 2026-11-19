@@ -39,6 +39,8 @@ struct DashboardView: View {
                                     NetworkUsageCard(usage: store.networkUsage, title: plugin.name)
                                 } else if plugin.stateID == Countdown.pluginStateID {
                                     CountdownCard(countdown: store.countdown, title: plugin.name)
+                                } else if plugin.stateID == PowerMonitor.pluginStateID {
+                                    PowerMonitorCard(monitor: store.powerMonitor, title: plugin.name)
                                 } else {
                                     PluginCardView(
                                         snapshot: store.snapshot(for: plugin),
@@ -62,8 +64,14 @@ struct DashboardView: View {
             }
             .clipShape(RoundedRectangle(cornerRadius: 16))
         }
-        .onAppear { store.networkUsage.visible = true }
-        .onDisappear { store.networkUsage.visible = false }
+        .onAppear {
+            store.networkUsage.visible = true
+            store.powerMonitor.visible = true
+        }
+        .onDisappear {
+            store.networkUsage.visible = false
+            store.powerMonitor.visible = false
+        }
         .background(backgroundView)
         .background(
             GeometryReader { proxy in
