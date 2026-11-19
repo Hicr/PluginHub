@@ -9,6 +9,7 @@ import WidgetKit
 @MainActor
 final class PluginHubStore: ObservableObject {
     let networkUsage = NetworkUsage()
+    let countdown = Countdown()
     @Published var configuration: AppConfiguration
     @Published private(set) var snapshots: [UUID: PluginSnapshot] = [:]
     @Published var lastError: String?
@@ -63,6 +64,7 @@ final class PluginHubStore: ObservableObject {
         }
         syncMissingPluginsFromDirectory()
         registerNetworkUsage()
+        registerCountdown()
         reloadAllMetadata()
         try? configStore.save(configuration)
         loadCardStates()
@@ -133,6 +135,21 @@ final class PluginHubStore: ObservableObject {
         ))
     }
 
+    private func registerCountdown() {
+        guard !configuration.plugins.contains(where: { $0.stateID == Countdown.pluginStateID }) else { return }
+        configuration.plugins.append(PluginConfiguration(
+            stateID: Countdown.pluginStateID,
+            name: "倒计时",
+            enabled: true,
+            executablePath: "",
+            metadata: PluginMetadata(
+                name: "倒计时",
+                description: "电子时钟倒计时，支持最长 99 天，关闭面板后按原结束时间继续",
+                icon: "timer"
+            )
+        ))
+    }
+
     func addPlugin(fileURL: URL) {
         let metadata = PluginMetadataParser.parse(fileURL: fileURL)
         let name = metadata?.name ?? fileURL.deletingPathExtension().lastPathComponent
@@ -184,7 +201,7 @@ final class PluginHubStore: ObservableObject {
         lastError = nil
         saveConfiguration()
 
-        guard configuration.plugins[index].stateID != NetworkUsage.pluginStateID else { return }
+        guard !configuration.plugins[index].isNativePlugin else { return }
         snapshots[id] = makeSnapshot(
             for: configuration.plugins[index],
             state: .loading,
@@ -196,7 +213,7 @@ final class PluginHubStore: ObservableObject {
 
     func reloadMetadata(pluginID: UUID) {
         guard let index = configuration.plugins.firstIndex(where: { $0.id == pluginID }) else { return }
-        guard configuration.plugins[index].stateID != NetworkUsage.pluginStateID else { return }
+        guard !configuration.plugins[index].isNativePlugin else { return }
         let fileURL = URL(fileURLWithPath: configuration.plugins[index].executablePath)
         let metadata = PluginMetadataParser.parse(fileURL: fileURL)
         configuration.plugins[index].metadata = metadata
@@ -214,7 +231,7 @@ final class PluginHubStore: ObservableObject {
 
     func removePlugin(id: UUID) {
         guard let index = configuration.plugins.firstIndex(where: { $0.id == id }) else { return }
-        guard configuration.plugins[index].stateID != NetworkUsage.pluginStateID else { return }
+        guard !configuration.plugins[index].isNativePlugin else { return }
         configuration.plugins.remove(at: index)
         snapshots.removeValue(forKey: id)
         refreshTasks[id]?.cancel()
@@ -234,6 +251,7 @@ final class PluginHubStore: ObservableObject {
             networkUsage.refresh()
             return
         }
+        if plugin.stateID == Countdown.pluginStateID { return }
         guard plugin.enabled else { return }
         guard force || stateStore.needsRefresh(stateID: plugin.stateID, intervalSeconds: plugin.refreshIntervalSeconds) else { return }
 
@@ -382,7 +400,7 @@ final class PluginHubStore: ObservableObject {
             networkUsage.configure(plugin)
         }
 
-        for plugin in configuration.plugins where plugin.enabled && plugin.stateID != NetworkUsage.pluginStateID {
+        for plugin in configuration.plugins where plugin.enabled && !plugin.isNativePlugin {
             let id = plugin.id
             let interval = max(plugin.refreshIntervalSeconds, 5)
             let hasCached = stateStore.load(stateID: plugin.stateID) != nil
@@ -408,7 +426,7 @@ final class PluginHubStore: ObservableObject {
     }
 
     private func refreshPluginsAfterConfigurationChange() {
-        for plugin in configuration.plugins where plugin.enabled && plugin.stateID != NetworkUsage.pluginStateID {
+        for plugin in configuration.plugins where plugin.enabled && !plugin.isNativePlugin {
             let snapshot = snapshots[plugin.id]
             let hasCached = stateStore.load(stateID: plugin.stateID) != nil
             let shouldRefresh = !hasCached || snapshot?.state == .loading || isFailed(snapshot?.state)
@@ -493,7 +511,7 @@ final class PluginHubStore: ObservableObject {
 
     private func updateWidgetPluginList() {
         let infos = configuration.plugins.compactMap { plugin -> WidgetPluginInfo? in
-            guard plugin.enabled, plugin.stateID != NetworkUsage.pluginStateID else { return nil }
+            guard plugin.enabled, !plugin.isNativePlugin else { return nil }
             let snapshot = snapshots[plugin.id]
             let components = (snapshot?.components ?? []).enumerated().compactMap { idx, comp -> WidgetComponentInfo? in
                 switch comp {
@@ -537,7 +555,7 @@ final class PluginHubStore: ObservableObject {
         fileMonitors.values.forEach { $0.cancel() }
         fileMonitors = [:]
 
-        for plugin in configuration.plugins where plugin.stateID != NetworkUsage.pluginStateID {
+        for plugin in configuration.plugins where !plugin.isNativePlugin {
             let path = triggerFilePath(for: plugin.stateID)
             // 确保 trigger 文件存在
             if !FileManager.default.fileExists(atPath: path) {
@@ -558,5 +576,12 @@ final class PluginHubStore: ObservableObject {
             source.resume()
             fileMonitors[pluginID] = source
         }
+    }
+}
+
+
+extension PluginConfiguration {
+    var isNativePlugin: Bool {
+        stateID == NetworkUsage.pluginStateID || stateID == Countdown.pluginStateID
     }
 }

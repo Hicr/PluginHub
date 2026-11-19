@@ -692,3 +692,24 @@ public struct PluginCachedState: Codable, Equatable, Sendable {
         self.icon = icon
     }
 }
+
+// MARK: - 倒计时
+
+public struct CountdownState: Codable, Equatable, Sendable {
+    public var duration: TimeInterval
+    public var endDate: Date?
+
+    public init(duration: TimeInterval = 0, endDate: Date? = nil) {
+        self.duration = duration
+        self.endDate = endDate
+    }
+
+    public func remaining(at date: Date) -> TimeInterval {
+        max(0, endDate?.timeIntervalSince(date) ?? 0)
+    }
+
+    public func remainingFraction(at date: Date) -> Double {
+        guard duration > 0 else { return 0 }
+        return min(1, remaining(at: date) / duration)
+    }
+}

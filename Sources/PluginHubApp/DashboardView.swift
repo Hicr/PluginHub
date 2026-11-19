@@ -37,6 +37,8 @@ struct DashboardView: View {
                             ForEach(Array(enabledPlugins.enumerated()), id: \.element.id) { index, plugin in
                                 if plugin.stateID == NetworkUsage.pluginStateID {
                                     NetworkUsageCard(usage: store.networkUsage, title: plugin.name)
+                                } else if plugin.stateID == Countdown.pluginStateID {
+                                    CountdownCard(countdown: store.countdown, title: plugin.name)
                                 } else {
                                     PluginCardView(
                                         snapshot: store.snapshot(for: plugin),

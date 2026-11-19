@@ -15,7 +15,7 @@ private struct NetworkDay: Codable {
 
 @MainActor
 final class NetworkUsage: ObservableObject {
-    static let pluginStateID = "builtin-network-usage"
+    nonisolated static let pluginStateID = "builtin-network-usage"
     static let continuousKey = "continuous"
 
     private var enabled = false

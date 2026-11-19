@@ -310,7 +310,7 @@ struct PluginSettingsView: View {
                         .frame(width: 24, height: 24)
                 }
                 .buttonStyle(.borderless)
-                .disabled(selectedPluginID == nil || draft?.stateID == NetworkUsage.pluginStateID)
+                .disabled(selectedPluginID == nil || draft?.isNativePlugin == true)
 
                 Spacer()
 
@@ -379,7 +379,7 @@ struct PluginSettingsView: View {
                                     .textFieldStyle(.roundedBorder)
                             }
 
-                            if draft.stateID != NetworkUsage.pluginStateID {
+                            if !draft.isNativePlugin {
                                 pluginRow("脚本") {
                                     HStack(spacing: 4) {
                                         TextField("Python 脚本路径", text: draftBinding.executablePath)
@@ -402,13 +402,15 @@ struct PluginSettingsView: View {
                                 }
                             }
 
-                            pluginRow(draft.stateID == NetworkUsage.pluginStateID ? "采集间隔" : "刷新间隔") {
-                                HStack(spacing: 4) {
-                                    TextField("秒", value: draftBinding.refreshIntervalSeconds, format: .number)
-                                        .textFieldStyle(.roundedBorder)
-                                        .frame(width: 80)
-                                    Text("秒")
-                                        .foregroundStyle(.secondary)
+                            if draft.stateID != Countdown.pluginStateID {
+                                pluginRow(draft.stateID == NetworkUsage.pluginStateID ? "采集间隔" : "刷新间隔") {
+                                    HStack(spacing: 4) {
+                                        TextField("秒", value: draftBinding.refreshIntervalSeconds, format: .number)
+                                            .textFieldStyle(.roundedBorder)
+                                            .frame(width: 80)
+                                        Text("秒")
+                                            .foregroundStyle(.secondary)
+                                    }
                                 }
                             }
                         }

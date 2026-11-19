@@ -38,7 +38,7 @@ cp "Resources/PluginAuthoringGuide.html" "$APP_DIR/Contents/Resources/" 2>/dev/n
 cp -r "Resources/BundledPlugins" "$APP_DIR/Contents/Resources/Plugins" 2>/dev/null || true
 
 # Info.plist
-cat > "$APP_DIR/Contents/Info.plist" << 'PLIST'
+cat > "$APP_DIR/Contents/Info.plist" << PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -70,7 +70,7 @@ if [ -f "$WIDGET_BIN" ]; then
     mkdir -p "$WIDGET_DIR/Contents/MacOS"
     cp "$WIDGET_BIN" "$WIDGET_DIR/Contents/MacOS/${APP_NAME}Widget"
 
-    cat > "$WIDGET_DIR/Contents/Info.plist" << 'WPLIST'
+    cat > "$WIDGET_DIR/Contents/Info.plist" << WPLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
